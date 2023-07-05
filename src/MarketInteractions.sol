@@ -13,7 +13,7 @@ contract MarketInteractions {
 
     //=============== STATE VARIABLES ===============//
 
-    address payable owner;
+    address payable public owner;
 
     IPoolAddressesProvider public immutable addressesProvider;
     IPool public immutable pool;
