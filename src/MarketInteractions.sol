@@ -10,6 +10,8 @@ contract MarketInteractions {
     //=============== ERRORS ===============//
 
     error MarketInteractions__notOwner();
+    error MarketInteractions__transferFailed();
+    error MarketInteractions__zeroTokenBalance();
 
     //=============== STATE VARIABLES ===============//
 
@@ -18,7 +20,11 @@ contract MarketInteractions {
     IPoolAddressesProvider public immutable addressesProvider;
     IPool public immutable pool;
 
-    IERC20 public immutable link;
+    //=============== EVENTS ===============//
+
+    event LiquiditySupplied(address indexed asset, uint256 indexed amount);
+    event LiquidityWithdrawn(address indexed asset, uint256 indexed amount);
+    event TokensWithdrawn(address indexed token, uint256 indexed amount);
 
     //=============== MODIFIERS ===============//
 
@@ -31,11 +37,10 @@ contract MarketInteractions {
 
     //=============== CONSTRUCTOR ===============//
 
-    constructor(IPoolAddressesProvider _addressesProvider, IERC20 _link) {
+    constructor(IPoolAddressesProvider _addressesProvider) {
         owner = payable(msg.sender);
         addressesProvider = _addressesProvider;
         pool = IPool(addressesProvider.getPool());
-        link = _link;
     }
 
     //=============== FALLBACK ===============//
@@ -46,42 +51,69 @@ contract MarketInteractions {
 
     /**
      * @notice Deposit token into the Aave protocol
+     * @dev The caller must approve this contract to spend the token
+     * @dev Sends tokens to this contract, caller must withdrawLiquidty and then call withdraw to get them back
      * @param _asset The address of the token to deposit
      * @param _amount The amount of token to deposit
      */
-    function supplyLiquidity(address _asset, uint256 _amount) external {
+    function supplyLiquidity(address _asset, uint256 _amount) external onlyOwner {
         address onBehalfOf = address(this);
         uint16 referralCode = 0;
 
+        emit LiquiditySupplied(_asset, _amount);
+
+        bool success = IERC20(_asset).transferFrom(msg.sender, address(this), _amount);
+        if (!success) {
+            revert MarketInteractions__transferFailed();
+        }
+
+        IERC20(_asset).approve(address(pool), _amount);
         pool.supply(_asset, _amount, onBehalfOf, referralCode);
     }
 
     /**
      * @notice Withdraw token from the Aave protocol
+     * Withdraws an _amount of underlying asset from the reserve, burning the equivalent aTokens owned
      * @param _asset The address of the underlying token to withdraw
      * @param _amount The amount of token to withdraw
      * Send the value type(uint256).max in order to withdraw the whole aToken balance
      */
-    function withdrawLiquidity(address _asset, uint256 _amount) external returns (uint256) {
+    function withdrawLiquidity(address _asset, uint256 _amount) external onlyOwner returns (uint256) {
         address to = address(this);
 
-        return pool.withdraw(_asset, _amount, to);
+        uint256 earned = pool.withdraw(_asset, _amount, to);
+        emit LiquidityWithdrawn(_asset, earned);
+
+        return earned;
     }
 
     /**
      * @notice Withdraw tokens from this contract to the owner
-     * @param _tokenAddress The address of the token to withdraw
+     * @param _token The address of the token to withdraw
      */
-    function withdraw(address _tokenAddress) external onlyOwner {
-        IERC20 token = IERC20(_tokenAddress);
-        token.transfer(msg.sender, token.balanceOf(address(this)));
-    }
+    function withdraw(address _token) external onlyOwner {
+        uint256 balance = getBalance(_token);
+        if (balance == 0) {
+            revert MarketInteractions__zeroTokenBalance();
+        }
 
-    function approveLINK(uint256 _amount, address _poolContractAddress) external returns (bool) {
-        return link.approve(_poolContractAddress, _amount);
+        emit TokensWithdrawn(_token, balance);
+
+        bool success = IERC20(_token).transfer(msg.sender, balance);
+        if (!success) {
+            revert MarketInteractions__transferFailed();
+        }
     }
 
     //=============== VIEW FUNCTIONS ===============//
+
+    /**
+     * @notice Returns the balance of the contract for token
+     * @param _token The address of the token
+     */
+    function getBalance(address _token) public view returns (uint256) {
+        return IERC20(_token).balanceOf(address(this));
+    }
 
     /**
      * @notice Returns the user account data across all the reserves in Aave
@@ -106,21 +138,5 @@ contract MarketInteractions {
         )
     {
         return pool.getUserAccountData(_user);
-    }
-
-    /**
-     * @notice Returns the allowance of the pool contract for LINK token
-     * @param _poolContract The address of the pool contract
-     */
-    function allowanceLINK(address _poolContract) external view returns (uint256) {
-        return link.allowance(address(this), _poolContract);
-    }
-
-    /**
-     * @notice Returns the balance of the contract for token
-     * @param _token The address of the token
-     */
-    function getBalance(address _token) external view returns (uint256) {
-        return IERC20(_token).balanceOf(address(this));
     }
 }
