@@ -9,6 +9,8 @@ import {IERC20} from "@aave/core-v3/contracts/dependencies/openzeppelin/contract
 contract MarketInteractions {
     //=============== ERRORS ===============//
 
+    error MarketInteractions__invalidAmount();
+    error MarketInteractions__invalidAddress();
     error MarketInteractions__notOwner();
     error MarketInteractions__transferFailed();
     error MarketInteractions__zeroTokenBalance();
@@ -57,6 +59,10 @@ contract MarketInteractions {
      * @param _amount The amount of token to deposit
      */
     function supplyLiquidity(address _asset, uint256 _amount) external onlyOwner {
+        if (_amount <= 0) {
+            revert MarketInteractions__invalidAmount();
+        }
+
         address onBehalfOf = address(this);
         uint16 referralCode = 0;
 
@@ -79,6 +85,13 @@ contract MarketInteractions {
      * Send the value type(uint256).max in order to withdraw the whole aToken balance
      */
     function withdrawLiquidity(address _asset, uint256 _amount) external onlyOwner returns (uint256) {
+        if (_amount <= 0) {
+            revert MarketInteractions__invalidAmount();
+        }
+        if (_asset == address(0)) {
+            revert MarketInteractions__invalidAddress();
+        }
+
         address to = address(this);
 
         uint256 earned = pool.withdraw(_asset, _amount, to);
@@ -92,7 +105,12 @@ contract MarketInteractions {
      * @param _token The address of the token to withdraw
      */
     function withdraw(address _token) external onlyOwner {
+        if (_token == address(0)) {
+            revert MarketInteractions__invalidAddress();
+        }
+
         uint256 balance = getBalance(_token);
+
         if (balance == 0) {
             revert MarketInteractions__zeroTokenBalance();
         }
@@ -112,6 +130,10 @@ contract MarketInteractions {
      * @param _token The address of the token
      */
     function getBalance(address _token) public view returns (uint256) {
+        if (_token == address(0)) {
+            revert MarketInteractions__invalidAddress();
+        }
+
         return IERC20(_token).balanceOf(address(this));
     }
 
